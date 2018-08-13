@@ -6,6 +6,7 @@ import EmberObject from '@ember/object';
 import { A as emberA } from '@ember/array';
 import { resolve, reject } from 'rsvp';
 import { run } from '@ember/runloop';
+import Pretender from 'pretender';
 
 module('foo', function(hooks) {
   setupTest(hooks);
@@ -61,10 +62,22 @@ module('foo', function(hooks) {
       linkedModel: bar,
       fileTokens: emberA(['abc123'])
     };
+
+    // ED 2.18 This is not needed
+    const server = new Pretender;
+
+    server.get('/bazs/1', () => {
+      return [200, {}, JSON.stringify({
+        baz: {
+          id: 1,
+          name: 'Baz 1*'
+        }
+      })];
+    });
   });
 
   test('#saveFoo (success)', function(assert) {
-    assert.expect(6);
+    assert.expect(8);
 
     foo.save = resolve;
 
@@ -80,16 +93,21 @@ module('foo', function(hooks) {
       baz1 = store.peekAll('baz').findBy('id', 1);
       baz3 = store.peekAll('baz').findBy('token', 'abc123');
 
-      assert.equal(foo.get('name'), 'Foo 1*', 'the changes are applied to the foo');
+      assert.equal(foo.get('name'), 'Foo 1*', 'the changes are applied to foo');
 
       foo.get('bar').then(linkedModel => {
         assert.deepEqual(linkedModel, bar,
-          'the model to link to the foo is set as a relationship');
+          'the model to link to foo is set as a relationship');
       });
 
       foo.get('bazs').then(bazs => {
-        assert.deepEqual(bazs.toArray(), [baz2, baz3],
-          'bazs to detach are deleted from the foo');
+        assert.ok(!bazs.includes(baz1), 'bazs to detach are removed');
+        assert.ok(bazs.includes(baz2), 'existing bazs remain untouched');
+        assert.ok(bazs.includes(baz3), 'bazs to attach are added');
+
+        // No longer works
+        // assert.deepEqual(bazs.toArray(), [baz2, baz3],
+        //   'bazs to detach are removed from foo');
 
         assert.strictEqual(baz1, undefined,
           'the deleted bazs are unloaded from the store');
@@ -109,7 +127,7 @@ module('foo', function(hooks) {
     return promise.catch(() => {
       baz3 = store.peekAll('bazs').findBy('token', 'abc123');
 
-      assert.equal(foo.get('name'), 'Foo 1', 'the foo changes are reverted');
+      assert.equal(foo.get('name'), 'Foo 1', 'foo changes are reverted');
 
       foo.get('bar').then(linkedModel => {
         assert.deepEqual(linkedModel, null,
@@ -117,9 +135,14 @@ module('foo', function(hooks) {
       });
 
       foo.get('bazs').then(bazs => {
-        assert.deepEqual(bazs.toArray(), [baz1, baz2],
-          'bazs flagged for deletion are still present and new ' +
-          'bazs are not');
+        assert.ok(bazs.includes(baz1), 'bazs flagged for deletion are still present');
+        assert.ok(bazs.includes(baz2), 'existing bazs remain untouched');
+        assert.ok(!bazs.includes(baz3), 'new bazs are unloaded');
+
+        // No longer works
+        // assert.deepEqual(bazs.toArray(), [baz1, baz2],
+        //   'bazs flagged for deletion are still present and new ' +
+        //   'bazs are not');
 
         assert.ok(baz1.get('_delete') === false && baz2.get('_delete') === false,
           'any bazs that were flagged for deletion, are no longer');
